@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 const { google } = require("googleapis");
 
 /**
@@ -30,7 +31,12 @@ class GDriveAPI {
       this.log("[GDRIVE] Initializing Google Drive API...");
 
       // Load credentials from google_drive_auth.json
-      const credentialsPath = this.config.keyFilePath || "./google_drive_auth.json";
+      // If path is relative, resolve it relative to module directory
+      const keyFilePath = this.config.keyFilePath || "./google_drive_auth.json";
+      const credentialsPath = path.isAbsolute(keyFilePath)
+        ? keyFilePath
+        : path.resolve(__dirname, "..", keyFilePath);
+
       const credentialsFile = JSON.parse(
         await fs.promises.readFile(credentialsPath, "utf8")
       );
@@ -39,7 +45,11 @@ class GDriveAPI {
       const credentials = credentialsFile.installed || credentialsFile.web || credentialsFile;
 
       // Load token from token_drive.json
-      const tokenPath = this.config.tokenPath || "./token_drive.json";
+      // If path is relative, resolve it relative to module directory
+      const tokenFilePath = this.config.tokenPath || "./token_drive.json";
+      const tokenPath = path.isAbsolute(tokenFilePath)
+        ? tokenFilePath
+        : path.resolve(__dirname, "..", tokenFilePath);
       const token = JSON.parse(
         await fs.promises.readFile(tokenPath, "utf8")
       );
