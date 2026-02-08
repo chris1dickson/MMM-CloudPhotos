@@ -48,12 +48,33 @@
     scanInterval: 1000 * 60 * 60 * 6,  // 6 hours in milliseconds
 
     // ===========================================
+    // NEW in V3: Photo Sort Mode
+    // ===========================================
+    // How to order photos for display
+    // Options:
+    //   'sequential' - Show photos in order by ID (no skipping, deterministic)
+    //   'random'     - Random order each cycle
+    //   'newest'     - Show newest photos first (by creation/upload date)
+    //   'oldest'     - Show oldest photos first (by creation/upload date)
+    sortMode: 'sequential',           // Default: 'sequential'
+
+    // Note: All modes prioritize unviewed photos first, then cycle through viewed photos
+
+    // ===========================================
+    // NEW in V3: BLOB Storage & Image Processing
+    // ===========================================
+    // Enable BLOB storage (stores images in database instead of loose files)
+    // Requires 'sharp' library: npm install sharp
+    useBlobStorage: true,             // Default: true (if sharp is installed)
+    jpegQuality: 85,                  // JPEG quality (1-100, default: 85)
+
+    // ===========================================
     // UNCHANGED: Display Settings (same as V2)
     // ===========================================
     // How often to change photos (default: 60 seconds, minimum: 10 seconds)
     updateInterval: 1000 * 60,  // 60 seconds
 
-    // Display resolution (used for photo quality)
+    // Display resolution (used for image resizing & quality)
     showWidth: 1080,
     showHeight: 1920,
 

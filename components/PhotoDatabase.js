@@ -13,11 +13,16 @@ class PhotoDatabase {
   /**
    * @param {string} dbPath - Path to SQLite database file
    * @param {Function} logger - Logging function
+   * @param {Object} config - Configuration options
    */
-  constructor(dbPath, logger = console.log) {
+  constructor(dbPath, logger = console.log, config = {}) {
     this.dbPath = dbPath;
     this.log = logger;
     this.db = null;
+
+    // Photo display sorting configuration
+    // Options: 'sequential', 'random', 'newest', 'oldest'
+    this.sortMode = config.sortMode || 'sequential';
   }
 
   /**
@@ -224,16 +229,41 @@ class PhotoDatabase {
 
   /**
    * Get next photo to display (BLOB or file-based)
-   * Prioritizes BLOB storage, falls back to file-based
+   * Supports multiple sort modes: sequential, random, newest, oldest
    * @returns {Promise<Object|null>} Photo metadata or null
    */
   async getNextPhoto() {
     try {
+      // Build ORDER BY clause based on sort mode
+      let orderBy;
+      switch (this.sortMode) {
+        case 'random':
+          // Random order, prioritize unviewed photos
+          orderBy = 'last_viewed_at ASC NULLS FIRST, RANDOM()';
+          break;
+
+        case 'newest':
+          // Newest photos first (by creation time), then cycle through viewed
+          orderBy = 'last_viewed_at ASC NULLS FIRST, creation_time DESC';
+          break;
+
+        case 'oldest':
+          // Oldest photos first (by creation time), then cycle through viewed
+          orderBy = 'last_viewed_at ASC NULLS FIRST, creation_time ASC';
+          break;
+
+        case 'sequential':
+        default:
+          // Sequential by ID (deterministic, no skipping)
+          orderBy = 'last_viewed_at ASC NULLS FIRST, id ASC';
+          break;
+      }
+
       const photo = await this.db.get(`
-        SELECT id, cached_path, cached_data, filename, width, height
+        SELECT id, cached_path, cached_data, filename, width, height, creation_time
         FROM photos
         WHERE (cached_data IS NOT NULL OR cached_path IS NOT NULL)
-        ORDER BY last_viewed_at ASC NULLS FIRST, RANDOM()
+        ORDER BY ${orderBy}
         LIMIT 1
       `);
 
@@ -358,7 +388,7 @@ class PhotoDatabase {
   }
 
   /**
-   * Clear cache information for a photo
+   * Clear cache information for a photo (both BLOB and file-based)
    * @param {string} photoId - Photo ID
    * @returns {Promise<void>}
    */
@@ -366,7 +396,11 @@ class PhotoDatabase {
     try {
       await this.db.run(`
         UPDATE photos
-        SET cached_path = NULL, cached_at = NULL, cached_size_bytes = NULL
+        SET cached_path = NULL,
+            cached_at = NULL,
+            cached_size_bytes = NULL,
+            cached_data = NULL,
+            cached_mime_type = NULL
         WHERE id = ?
       `, [photoId]);
 
@@ -377,7 +411,7 @@ class PhotoDatabase {
   }
 
   /**
-   * Get oldest cached photos (for eviction)
+   * Get oldest cached photos for eviction (both BLOB and file-based)
    * @param {number} limit - Number of photos to return
    * @returns {Promise<Array>} Array of photos with cache info
    */
@@ -386,7 +420,7 @@ class PhotoDatabase {
       const photos = await this.db.all(`
         SELECT id, cached_path, cached_size_bytes
         FROM photos
-        WHERE cached_path IS NOT NULL
+        WHERE cached_data IS NOT NULL OR cached_path IS NOT NULL
         ORDER BY last_viewed_at ASC
         LIMIT ?
       `, [limit]);
@@ -420,7 +454,7 @@ class PhotoDatabase {
   }
 
   /**
-   * Get count of cached photos
+   * Get count of cached photos (both BLOB and file-based)
    * @returns {Promise<number>} Number of cached photos
    */
   async getCachedPhotoCount() {
@@ -428,7 +462,7 @@ class PhotoDatabase {
       const result = await this.db.get(`
         SELECT COUNT(*) as count
         FROM photos
-        WHERE cached_path IS NOT NULL
+        WHERE cached_data IS NOT NULL OR cached_path IS NOT NULL
       `);
 
       return result?.count || 0;

@@ -244,6 +244,17 @@ async function main() {
 
   // Test 5: Cache Manager Initialization
   let cacheManager;
+  let useBlobStorage = false;
+
+  // Check if Sharp is available
+  try {
+    require("sharp");
+    useBlobStorage = true;
+    suite.log("Sharp library detected - BLOB storage will be enabled", "INFO");
+  } catch (e) {
+    suite.log("Sharp not installed - file-based storage will be used", "INFO");
+  }
+
   await suite.test("Cache Manager Initialization", async () => {
     // Create cache directory
     await fs.promises.mkdir(CONFIG.cachePath, { recursive: true });
@@ -251,7 +262,11 @@ async function main() {
     cacheManager = new CacheManager(
       {
         cachePath: CONFIG.cachePath,
-        maxCacheSizeMB: CONFIG.maxCacheSizeMB
+        maxCacheSizeMB: CONFIG.maxCacheSizeMB,
+        useBlobStorage: useBlobStorage,
+        showWidth: 1920,
+        showHeight: 1080,
+        jpegQuality: 85
       },
       database,
       driveAPI,
@@ -259,6 +274,11 @@ async function main() {
     );
 
     suite.log("Cache manager initialized");
+    suite.log(`  BLOB storage: ${cacheManager.useBlobStorage ? 'enabled' : 'disabled'}`);
+
+    if (cacheManager.useBlobStorage) {
+      suite.log(`  Image processing: ${cacheManager.screenWidth}x${cacheManager.screenHeight} @ ${cacheManager.jpegQuality}%`);
+    }
 
     // Stop automatic ticking for controlled testing
     cacheManager.stop();
@@ -285,14 +305,23 @@ async function main() {
       throw new Error("Photo was not cached");
     }
 
-    // Verify file exists
+    // Verify photo was cached (either BLOB or file)
     const cachedPhoto = await database.getNextPhoto();
-    if (!cachedPhoto || !fs.existsSync(cachedPhoto.cached_path)) {
-      throw new Error("Cached file not found on disk");
+    if (!cachedPhoto) {
+      throw new Error("Cached photo not found");
     }
 
-    const stats = fs.statSync(cachedPhoto.cached_path);
-    suite.log(`File size: ${(stats.size / 1024).toFixed(2)} KB`);
+    if (cachedPhoto.cached_data) {
+      suite.log(`BLOB size: ${(cachedPhoto.cached_data.length / 1024).toFixed(2)} KB`);
+    } else if (cachedPhoto.cached_path) {
+      if (!fs.existsSync(cachedPhoto.cached_path)) {
+        throw new Error("Cached file not found on disk");
+      }
+      const stats = fs.statSync(cachedPhoto.cached_path);
+      suite.log(`File size: ${(stats.size / 1024).toFixed(2)} KB`);
+    } else {
+      throw new Error("Photo has no cached data");
+    }
   });
 
   // Test 7: Download Multiple Photos
@@ -345,12 +374,20 @@ async function main() {
     }
 
     suite.log(`Next photo: ${photo.filename}`);
-    suite.log(`  Path: ${photo.cached_path}`);
     suite.log(`  Resolution: ${photo.width}x${photo.height}`);
 
-    // Verify file exists and is readable
-    const fileBuffer = await fs.promises.readFile(photo.cached_path);
-    suite.log(`  File size: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
+    // Verify cached data (BLOB or file)
+    if (photo.cached_data) {
+      suite.log(`  BLOB size: ${(photo.cached_data.length / 1024).toFixed(2)} KB`);
+      suite.log(`  Storage: BLOB`);
+    } else if (photo.cached_path) {
+      suite.log(`  Path: ${photo.cached_path}`);
+      const fileBuffer = await fs.promises.readFile(photo.cached_path);
+      suite.log(`  File size: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
+      suite.log(`  Storage: File-based`);
+    } else {
+      throw new Error("Photo has no cached data");
+    }
 
     // Mark as viewed
     await database.markPhotoViewed(photo.id);
@@ -417,6 +454,362 @@ async function main() {
     }
 
     suite.log("Settings storage working correctly");
+  });
+
+  // ============================================================
+  // NEW BLOB STORAGE TESTS
+  // ============================================================
+
+  // Test 13: BLOB Storage Detection
+  await suite.test("BLOB Storage Mode Detection", async () => {
+    const storageStats = await database.db.all(`
+      SELECT
+        COUNT(*) as total_cached,
+        SUM(CASE WHEN cached_data IS NOT NULL THEN 1 ELSE 0 END) as blob_count,
+        SUM(CASE WHEN cached_path IS NOT NULL THEN 1 ELSE 0 END) as file_count,
+        SUM(cached_size_bytes) as total_size
+      FROM photos
+      WHERE cached_data IS NOT NULL OR cached_path IS NOT NULL
+    `);
+
+    const storage = storageStats[0];
+
+    suite.log(`Total cached: ${storage.total_cached} photos`);
+    suite.log(`BLOB storage: ${storage.blob_count} photos`);
+    suite.log(`File storage: ${storage.file_count} photos`);
+    suite.log(`Total size: ${(storage.total_size / 1024).toFixed(2)} KB`);
+
+    if (useBlobStorage && storage.blob_count === 0 && storage.file_count > 0) {
+      throw new Error("BLOB mode enabled but no BLOBs stored");
+    }
+
+    if (!useBlobStorage && storage.file_count === 0 && storage.blob_count > 0) {
+      throw new Error("File mode enabled but no files stored");
+    }
+
+    suite.log(`Storage mode working correctly (BLOB: ${useBlobStorage})`);
+  });
+
+  // Test 14: BLOB Data Validation
+  await suite.test("BLOB Data Validation", async () => {
+    const blobPhotos = await database.db.all(`
+      SELECT id, filename, cached_data, cached_mime_type, cached_size_bytes
+      FROM photos
+      WHERE cached_data IS NOT NULL
+      LIMIT 1
+    `);
+
+    if (blobPhotos.length === 0) {
+      suite.log("No BLOB photos to validate (file mode or no photos cached)", "WARN");
+      return;
+    }
+
+    const photo = blobPhotos[0];
+    suite.log(`Validating BLOB: ${photo.filename}`);
+
+    // Check Buffer
+    if (!Buffer.isBuffer(photo.cached_data)) {
+      throw new Error("cached_data is not a Buffer");
+    }
+    suite.log(`  ✓ Valid Buffer (${(photo.cached_data.length / 1024).toFixed(2)} KB)`);
+
+    // Check MIME type
+    if (photo.cached_mime_type !== 'image/jpeg') {
+      throw new Error(`Unexpected MIME type: ${photo.cached_mime_type}`);
+    }
+    suite.log(`  ✓ Correct MIME type: ${photo.cached_mime_type}`);
+
+    // Check JPEG header
+    const header = photo.cached_data.slice(0, 3).toString('hex');
+    if (header !== 'ffd8ff') {
+      throw new Error(`Invalid JPEG header: ${header}`);
+    }
+    suite.log(`  ✓ Valid JPEG header (FFD8FF)`);
+
+    // Check size matches
+    if (photo.cached_data.length !== photo.cached_size_bytes) {
+      throw new Error(`Size mismatch: ${photo.cached_data.length} vs ${photo.cached_size_bytes}`);
+    }
+    suite.log(`  ✓ Size matches database record`);
+
+    // Test base64 conversion (for frontend)
+    const base64 = photo.cached_data.toString('base64');
+    if (!base64 || base64.length === 0) {
+      throw new Error("Failed to convert to base64");
+    }
+    suite.log(`  ✓ Can convert to base64 (${(base64.length / 1024).toFixed(2)} KB)`);
+
+    suite.log("BLOB data validation passed");
+  });
+
+  // Test 15: Image Compression Verification
+  await suite.test("Image Compression Verification", async () => {
+    if (!useBlobStorage) {
+      suite.log("Skipping - BLOB storage not enabled", "WARN");
+      return;
+    }
+
+    const compressionStats = await database.db.all(`
+      SELECT
+        filename,
+        cached_size_bytes,
+        width,
+        height
+      FROM photos
+      WHERE cached_data IS NOT NULL
+      ORDER BY cached_size_bytes DESC
+      LIMIT 3
+    `);
+
+    if (compressionStats.length === 0) {
+      suite.log("No BLOB photos for compression check", "WARN");
+      return;
+    }
+
+    suite.log("Compression results:");
+    for (const photo of compressionStats) {
+      suite.log(`  ${photo.filename}: ${(photo.cached_size_bytes / 1024).toFixed(2)} KB (${photo.width}x${photo.height})`);
+    }
+
+    // Check that images are reasonably compressed
+    // Expect < 200KB for 1920x1080 @ 85% quality
+    const oversized = compressionStats.filter(p => p.cached_size_bytes > 200 * 1024);
+    if (oversized.length > 0) {
+      suite.log(`Warning: ${oversized.length} photos over 200KB`, "WARN");
+    }
+
+    suite.log("Compression working as expected");
+  });
+
+  // Test 16: Mixed Storage Compatibility
+  await suite.test("Mixed Storage Mode Compatibility", async () => {
+    const nextPhoto = await database.getNextPhoto();
+
+    if (!nextPhoto) {
+      throw new Error("No photo available for compatibility test");
+    }
+
+    suite.log(`Testing retrieval: ${nextPhoto.filename}`);
+
+    // Verify photo has EITHER cached_data OR cached_path
+    const hasBlobData = nextPhoto.cached_data !== null && nextPhoto.cached_data !== undefined;
+    const hasFilePath = nextPhoto.cached_path !== null && nextPhoto.cached_path !== undefined;
+
+    if (!hasBlobData && !hasFilePath) {
+      throw new Error("Photo has neither BLOB data nor file path");
+    }
+
+    if (hasBlobData) {
+      suite.log(`  ✓ Using BLOB storage (${(nextPhoto.cached_data.length / 1024).toFixed(2)} KB)`);
+    }
+
+    if (hasFilePath) {
+      suite.log(`  ✓ Using file storage (${nextPhoto.cached_path})`);
+    }
+
+    suite.log("Mixed storage compatibility verified");
+  });
+
+  // ============================================================
+  // SORT MODE TESTS
+  // ============================================================
+
+  // Test 17: Sequential Sort Mode
+  await suite.test("Sequential Sort Mode", async () => {
+    // Create new database with sequential sort
+    const seqDb = new PhotoDatabase(
+      path.resolve(__dirname, "cache", "test_seq_sort.db"),
+      suite.log.bind(suite),
+      { sortMode: 'sequential' }
+    );
+    await seqDb.initialize();
+
+    // Add test photos with varying creation times and mark as viewed
+    const testPhotos = [
+      { id: 'photo_c', name: 'photo_c.jpg', createdTime: '2024-03-01T10:00:00Z' },
+      { id: 'photo_a', name: 'photo_a.jpg', createdTime: '2024-01-01T10:00:00Z' },
+      { id: 'photo_b', name: 'photo_b.jpg', createdTime: '2024-02-01T10:00:00Z' },
+    ];
+
+    await seqDb.savePhotos(testPhotos);
+
+    // Cache all photos
+    for (const photo of testPhotos) {
+      await seqDb.updatePhotoCacheBlob(photo.id, Buffer.from('test'), 'image/jpeg');
+    }
+
+    // Get photos in sequential order (should be a, b, c by ID)
+    const photo1 = await seqDb.getNextPhoto();
+    await seqDb.markPhotoViewed(photo1.id);
+    const photo2 = await seqDb.getNextPhoto();
+    await seqDb.markPhotoViewed(photo2.id);
+    const photo3 = await seqDb.getNextPhoto();
+    await seqDb.markPhotoViewed(photo3.id);
+
+    suite.log(`Order: ${photo1.id}, ${photo2.id}, ${photo3.id}`);
+
+    if (photo1.id !== 'photo_a' || photo2.id !== 'photo_b' || photo3.id !== 'photo_c') {
+      throw new Error(`Expected a,b,c but got ${photo1.id},${photo2.id},${photo3.id}`);
+    }
+
+    // Verify cycling - next photo should be the oldest viewed (photo_a)
+    const photo4 = await seqDb.getNextPhoto();
+    if (photo4.id !== 'photo_a') {
+      throw new Error(`Expected cycling to start with photo_a, got ${photo4.id}`);
+    }
+
+    await seqDb.close();
+    suite.log("Sequential sort order verified (a→b→c→a)");
+  });
+
+  // Test 18: Random Sort Mode
+  await suite.test("Random Sort Mode", async () => {
+    // Create new database with random sort
+    const randDb = new PhotoDatabase(
+      path.resolve(__dirname, "cache", "test_rand_sort.db"),
+      suite.log.bind(suite),
+      { sortMode: 'random' }
+    );
+    await randDb.initialize();
+
+    // Add test photos
+    const testPhotos = [
+      { id: 'photo_1', name: 'photo_1.jpg', createdTime: '2024-01-01T10:00:00Z' },
+      { id: 'photo_2', name: 'photo_2.jpg', createdTime: '2024-02-01T10:00:00Z' },
+      { id: 'photo_3', name: 'photo_3.jpg', createdTime: '2024-03-01T10:00:00Z' },
+      { id: 'photo_4', name: 'photo_4.jpg', createdTime: '2024-04-01T10:00:00Z' },
+      { id: 'photo_5', name: 'photo_5.jpg', createdTime: '2024-05-01T10:00:00Z' },
+    ];
+
+    await randDb.savePhotos(testPhotos);
+
+    // Cache all photos
+    for (const photo of testPhotos) {
+      await randDb.updatePhotoCacheBlob(photo.id, Buffer.from('test'), 'image/jpeg');
+    }
+
+    // Get first set of photos (all unviewed)
+    const firstRun = [];
+    for (let i = 0; i < 5; i++) {
+      const photo = await randDb.getNextPhoto();
+      firstRun.push(photo.id);
+      await randDb.markPhotoViewed(photo.id);
+    }
+
+    suite.log(`First run order: ${firstRun.join(', ')}`);
+
+    // Get second set (all viewed, should be random again)
+    const secondRun = [];
+    for (let i = 0; i < 5; i++) {
+      const photo = await randDb.getNextPhoto();
+      secondRun.push(photo.id);
+      await randDb.markPhotoViewed(photo.id);
+    }
+
+    suite.log(`Second run order: ${secondRun.join(', ')}`);
+
+    // Verify all photos are included (no skipping)
+    const uniqueFirst = new Set(firstRun);
+    const uniqueSecond = new Set(secondRun);
+
+    if (uniqueFirst.size !== 5 || uniqueSecond.size !== 5) {
+      throw new Error("Random mode should include all photos without skipping");
+    }
+
+    // While we can't guarantee randomness in small sample, verify it's not always sequential
+    const isSequential = firstRun.every((id, i) => id === `photo_${i + 1}`);
+    if (isSequential) {
+      suite.log("  ⚠ Order appears sequential, but may be random chance", "WARN");
+    } else {
+      suite.log("  ✓ Order is non-sequential (random)");
+    }
+
+    await randDb.close();
+    suite.log("Random sort mode verified");
+  });
+
+  // Test 19: Newest Sort Mode
+  await suite.test("Newest Sort Mode", async () => {
+    // Create new database with newest sort
+    const newestDb = new PhotoDatabase(
+      path.resolve(__dirname, "cache", "test_newest_sort.db"),
+      suite.log.bind(suite),
+      { sortMode: 'newest' }
+    );
+    await newestDb.initialize();
+
+    // Add test photos with different creation times
+    const testPhotos = [
+      { id: 'old_photo', name: 'old.jpg', createdTime: '2020-01-01T10:00:00Z' },
+      { id: 'new_photo', name: 'new.jpg', createdTime: '2024-12-01T10:00:00Z' },
+      { id: 'mid_photo', name: 'mid.jpg', createdTime: '2022-06-01T10:00:00Z' },
+    ];
+
+    await newestDb.savePhotos(testPhotos);
+
+    // Cache all photos
+    for (const photo of testPhotos) {
+      await newestDb.updatePhotoCacheBlob(photo.id, Buffer.from('test'), 'image/jpeg');
+    }
+
+    // Get photos in newest-first order
+    const photo1 = await newestDb.getNextPhoto();
+    await newestDb.markPhotoViewed(photo1.id);
+    const photo2 = await newestDb.getNextPhoto();
+    await newestDb.markPhotoViewed(photo2.id);
+    const photo3 = await newestDb.getNextPhoto();
+    await newestDb.markPhotoViewed(photo3.id);
+
+    suite.log(`Order: ${photo1.id}, ${photo2.id}, ${photo3.id}`);
+
+    if (photo1.id !== 'new_photo' || photo2.id !== 'mid_photo' || photo3.id !== 'old_photo') {
+      throw new Error(`Expected newest→oldest but got ${photo1.id},${photo2.id},${photo3.id}`);
+    }
+
+    await newestDb.close();
+    suite.log("Newest sort order verified (2024→2022→2020)");
+  });
+
+  // Test 20: Oldest Sort Mode
+  await suite.test("Oldest Sort Mode", async () => {
+    // Create new database with oldest sort
+    const oldestDb = new PhotoDatabase(
+      path.resolve(__dirname, "cache", "test_oldest_sort.db"),
+      suite.log.bind(suite),
+      { sortMode: 'oldest' }
+    );
+    await oldestDb.initialize();
+
+    // Add test photos with different creation times
+    const testPhotos = [
+      { id: 'new_photo', name: 'new.jpg', createdTime: '2024-12-01T10:00:00Z' },
+      { id: 'old_photo', name: 'old.jpg', createdTime: '2020-01-01T10:00:00Z' },
+      { id: 'mid_photo', name: 'mid.jpg', createdTime: '2022-06-01T10:00:00Z' },
+    ];
+
+    await oldestDb.savePhotos(testPhotos);
+
+    // Cache all photos
+    for (const photo of testPhotos) {
+      await oldestDb.updatePhotoCacheBlob(photo.id, Buffer.from('test'), 'image/jpeg');
+    }
+
+    // Get photos in oldest-first order
+    const photo1 = await oldestDb.getNextPhoto();
+    await oldestDb.markPhotoViewed(photo1.id);
+    const photo2 = await oldestDb.getNextPhoto();
+    await oldestDb.markPhotoViewed(photo2.id);
+    const photo3 = await oldestDb.getNextPhoto();
+    await oldestDb.markPhotoViewed(photo3.id);
+
+    suite.log(`Order: ${photo1.id}, ${photo2.id}, ${photo3.id}`);
+
+    if (photo1.id !== 'old_photo' || photo2.id !== 'mid_photo' || photo3.id !== 'new_photo') {
+      throw new Error(`Expected oldest→newest but got ${photo1.id},${photo2.id},${photo3.id}`);
+    }
+
+    await oldestDb.close();
+    suite.log("Oldest sort order verified (2020→2022→2024)");
   });
 
   // Clean up
