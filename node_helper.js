@@ -106,7 +106,13 @@ const NodeHelperObject = {
 
       // Initialize database
       this.log_info("Initializing database...");
-      this.database = new PhotoDatabase(this.dbPath, this.log_info.bind(this));
+      this.database = new PhotoDatabase(
+        this.dbPath,
+        this.log_info.bind(this),
+        {
+          sortMode: config.sortMode || 'sequential'
+        }
+      );
       await this.database.initialize();
 
       // Initialize Google Drive API
