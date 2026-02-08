@@ -33,7 +33,7 @@ const CONFIG = {
   // Your Google Drive folder ID (get from Drive URL)
   driveFolders: [
     {
-      id: "1dkAgKSTNWoY-qXMg4xHEyqJFRqZniB2I",
+      id: "YOUR_GOOGLE_DRIVE_FOLDER_ID",
       depth: -1                    // -1 = all subfolders
     }
   ],
