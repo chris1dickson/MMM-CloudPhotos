@@ -8,11 +8,11 @@ Display your photos from **cloud storage providers** on [MagicMirror²](https://
 
 ### Currently Supported
 
-- ✅ **Google Drive** - Display photos from Drive folders (fully supported)
+- ✅ **Google Drive** - Display photos from Drive folders ([Setup Guide](docs/GOOGLE_DRIVE_SETUP.md))
+- ✅ **OneDrive** - Microsoft cloud storage with Delta API sync ([Setup Guide](ONEDRIVE_SETUP.md))
 
 ### Coming Soon
 
-- 🔄 **OneDrive** - Microsoft cloud storage
 - 🔄 **Dropbox** - Popular file hosting
 - 🔄 **iCloud Photos** - Apple's photo service
 - 🔄 **Local Filesystem** - Scan local folders

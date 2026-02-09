@@ -1,6 +1,6 @@
 {
   "name": "mmm-cloudphotos",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "MagicMirror² module to display photos from cloud storage providers (Google Drive, OneDrive, Dropbox)",
   "license": "MIT",
   "author": "eouia0819@gmail.com",
