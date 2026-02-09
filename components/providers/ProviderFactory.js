@@ -9,8 +9,8 @@
 // Provider registry: Maps provider names to their implementation modules
 const PROVIDERS = {
   "google-drive": () => require("./GoogleDriveProvider"),
+  "onedrive": () => require("./OneDriveProvider"),
   // Future providers:
-  // "onedrive": () => require("./OneDriveProvider"),
   // "dropbox": () => require("./DropboxProvider"),
   // "icloud": () => require("./iCloudProvider"),
   // "local": () => require("./LocalFileProvider")

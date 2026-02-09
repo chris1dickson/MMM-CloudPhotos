@@ -1,5 +1,76 @@
 # Changelog
 
+## Version 3.1.0 - OneDrive Provider (2025-02-09)
+
+### ✨ New Features
+
+**OneDrive Support is Now Live!**
+
+MMM-CloudPhotos now supports **Microsoft OneDrive** as a photo storage provider, alongside Google Drive.
+
+#### What's New
+
+1. **OneDriveProvider** - Complete implementation using Microsoft Graph API
+   - OAuth2 authentication with refresh token support
+   - Folder scanning with depth control
+   - Incremental sync using Delta API (super efficient!)
+   - Automatic token refresh
+
+2. **Token Generation Script** - `generate_onedrive_token.js`
+   - Interactive OAuth2 flow
+   - Local callback server for easy authorization
+   - Saves token with client credentials
+
+3. **Comprehensive Documentation** - `ONEDRIVE_SETUP.md`
+   - Step-by-step Azure app registration
+   - Complete configuration examples
+   - Troubleshooting guide
+   - Security best practices
+
+#### Configuration Example
+
+```javascript
+{
+  module: "MMM-CloudPhotos",
+  position: "fullscreen_below",
+  config: {
+    provider: "onedrive",
+    providerConfig: {
+      clientId: "YOUR_CLIENT_ID",
+      clientSecret: "YOUR_CLIENT_SECRET",
+      tokenPath: "./token_onedrive.json",
+      folders: [
+        { id: "YOUR_FOLDER_ID", depth: -1 }
+      ]
+    },
+    updateInterval: 60000,
+    showWidth: 1920,
+    showHeight: 1080
+  }
+}
+```
+
+#### Features
+
+- ✅ **Delta API Sync** - Only fetch changes, not full folder scans
+- ✅ **Automatic Token Refresh** - Tokens refreshed before expiry
+- ✅ **Recursive Folder Scanning** - Scan subfolders to any depth
+- ✅ **Image Optimization** - Same Sharp processing as Google Drive
+- ✅ **Rate Limit Friendly** - 10,000 requests per 10 minutes
+
+#### Files Added
+
+- `components/providers/OneDriveProvider.js` - OneDrive implementation
+- `generate_onedrive_token.js` - OAuth token generator
+- `ONEDRIVE_SETUP.md` - Complete setup guide
+
+#### Provider Factory Updated
+
+- Registered OneDrive in ProviderFactory
+- Now supports: `google-drive` and `onedrive`
+
+---
+
 ## Version 3.0.0 - Module Refactor (2025-02-09)
 
 ### 🚨 Breaking Changes
