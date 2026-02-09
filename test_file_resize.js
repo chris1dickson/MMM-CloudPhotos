@@ -21,7 +21,7 @@ try {
 }
 
 // Import components
-const GDriveAPI = require("./components/GDriveAPI.js");
+const { createProvider } = require("./components/providers/ProviderFactory.js");
 const PhotoDatabase = require("./components/PhotoDatabase.js");
 const CacheManager = require("./components/CacheManager.js");
 
@@ -51,7 +51,13 @@ async function runTest() {
   const db = new PhotoDatabase(dbPath, console.log, { sortMode: 'sequential' });
   await db.initialize();
 
-  const driveAPI = new GDriveAPI(CONFIG, console.log);
+  const providerConfig = {
+    keyFilePath: CONFIG.keyFilePath,
+    tokenPath: CONFIG.tokenPath,
+    driveFolders: CONFIG.driveFolders
+  };
+  const driveAPI = createProvider("google-drive", providerConfig, console.log);
+  driveAPI.setDatabase(db);
   await driveAPI.initialize();
 
   const cacheManager = new CacheManager(CONFIG, db, driveAPI, console.log);

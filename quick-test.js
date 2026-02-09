@@ -11,7 +11,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const GDriveAPI = require("./components/GDriveAPI.js");
+const { createProvider } = require("./components/providers/ProviderFactory.js");
 const PhotoDatabase = require("./components/PhotoDatabase.js");
 const CacheManager = require("./components/CacheManager.js");
 
@@ -98,7 +98,13 @@ async function main() {
   // Test 2: Authenticate with Google Drive
   logStep("2", "Authenticating with Google Drive API");
 
-  const driveAPI = new GDriveAPI(config, database, (msg) => logInfo(msg));
+  const providerConfig = {
+    keyFilePath: config.keyFilePath,
+    tokenPath: config.tokenPath,
+    driveFolders: config.driveFolders
+  };
+  const driveAPI = createProvider("google-drive", providerConfig, (msg) => logInfo(msg));
+  driveAPI.setDatabase(database);
   await driveAPI.initialize();
   logSuccess("Successfully authenticated");
 

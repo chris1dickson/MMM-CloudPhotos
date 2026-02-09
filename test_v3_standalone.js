@@ -21,7 +21,7 @@ const fs = require("fs");
 const path = require("path");
 
 // Import our components
-const GDriveAPI = require("./components/GDriveAPI.js");
+const { createProvider } = require("./components/providers/ProviderFactory.js");
 const PhotoDatabase = require("./components/PhotoDatabase.js");
 const CacheManager = require("./components/CacheManager.js");
 
@@ -189,15 +189,13 @@ async function main() {
   // Test 2: Google Drive API Authentication
   let driveAPI;
   await suite.test("Google Drive API Authentication", async () => {
-    driveAPI = new GDriveAPI(
-      {
-        keyFilePath: CONFIG.keyFilePath,
-        tokenPath: CONFIG.tokenPath,
-        driveFolders: CONFIG.driveFolders
-      },
-      database,
-      (msg) => suite.log(msg)
-    );
+    const providerConfig = {
+      keyFilePath: CONFIG.keyFilePath,
+      tokenPath: CONFIG.tokenPath,
+      driveFolders: CONFIG.driveFolders
+    };
+    driveAPI = createProvider("google-drive", providerConfig, (msg) => suite.log(msg));
+    driveAPI.setDatabase(database);
 
     await driveAPI.initialize();
     suite.log("Google Drive API authenticated successfully");
