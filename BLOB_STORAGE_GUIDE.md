@@ -1,27 +1,32 @@
-# BLOB Storage Implementation Guide
+# Image Processing & Storage Guide
 
 ## Overview
 
-MMM-GooglePhotos V3 now supports storing processed images as BLOBs directly in SQLite, eliminating the need for loose image files on disk. This provides significant performance and reliability improvements, especially on Raspberry Pi with SD card storage.
+MMM-GooglePhotos V3 uses Sharp for automatic image processing (resizing and compression) and supports two storage modes:
+
+- **BLOB Storage**: Processed images stored in SQLite database
+- **File Storage**: Processed images saved to `cache/images/` folder
+
+**Both modes resize and compress images when Sharp is installed**, providing significant storage savings and better performance on Raspberry Pi.
 
 ## Benefits
 
-### Performance
+### Image Processing (Both Modes)
+- **Automatic resizing** - Images resized to your screen dimensions
+- **Compression** - Reduced storage with configurable JPEG quality (typically 70-80% smaller)
+- **Aspect ratio preserved** - Images fit screen without distortion
+- **Progressive JPEG** - Faster perceived loading
+- **MozJPEG optimization** - Better compression ratios
+
+### BLOB Storage (Additional Benefits)
 - **50% fewer I/O operations** - Single database query instead of query + file read
 - **Better cache efficiency** - SQLite's page cache is highly optimized
 - **Reduced SD card wear** - Fewer file system operations
 - **Faster image loading** - No file system overhead
-
-### Reliability
 - **Atomic operations** - Image data and metadata updated together
 - **No orphaned files** - Everything in one database
 - **Better data integrity** - ACID transactions protect your cache
 - **Simplified cleanup** - No manual file deletion needed
-
-### Image Processing
-- **Automatic resizing** - Images resized to your screen dimensions
-- **Compression** - Reduced storage with configurable JPEG quality
-- **Aspect ratio preserved** - Images fit screen without distortion
 
 ## Requirements
 
@@ -46,11 +51,13 @@ Add these options to your MagicMirror config:
     // Drive folders
     driveFolders: [...],
 
-    // BLOB Storage (new)
-    useBlobStorage: true,      // Enable BLOB mode (default: true if sharp installed)
+    // Image Processing (applies to both BLOB and file mode)
     showWidth: 1920,           // Screen width for image resizing
     showHeight: 1080,          // Screen height for image resizing
     jpegQuality: 85,           // JPEG quality (1-100, default: 85)
+
+    // Storage Mode
+    useBlobStorage: true,      // true = SQLite BLOBs, false = files (default: true if sharp installed)
 
     // Cache settings
     maxCacheSizeMB: 200,
@@ -61,9 +68,13 @@ Add these options to your MagicMirror config:
 }
 ```
 
+**Note:** Image processing happens in both modes when Sharp is installed. The `useBlobStorage` option only controls WHERE images are stored, not WHETHER they're processed.
+
 ## How It Works
 
 ### Download & Processing Pipeline
+
+**With Sharp Installed (Both Modes):**
 
 ```
 1. Download from Google Drive
@@ -76,15 +87,38 @@ Add these options to your MagicMirror config:
    ├─> Don't upscale small images
    └─> Compress to JPEG (85% quality)
 
-3. Store in SQLite
+3a. Store (BLOB Mode - useBlobStorage: true)
    ├─> Write processed buffer to cached_data BLOB
    ├─> Set mime_type to 'image/jpeg'
    ├─> Clear cached_path (file no longer needed)
    └─> Update cached_size_bytes
 
+3b. Store (File Mode - useBlobStorage: false)
+   ├─> Write processed buffer to cache/images/photoId.jpg
+   ├─> Set cached_path to file location
+   └─> Update cached_size_bytes
+
 4. Display
-   ├─> Query database (single operation)
-   ├─> Get BLOB directly from result
+   ├─> Query database (single operation for BLOB, or query + file read for file mode)
+   ├─> Get image data (from BLOB or from file)
+   ├─> Convert to base64
+   └─> Send to frontend
+```
+
+**Without Sharp Installed:**
+
+```
+1. Download from Google Drive
+   ├─> Stream image from Drive API
+   └─> Stream directly to file (no processing)
+
+2. Store
+   ├─> Write to cache/images/photoId.jpg
+   ├─> Set cached_path to file location
+   └─> Update cached_size_bytes (original size)
+
+3. Display
+   ├─> Query database + file read
    ├─> Convert to base64
    └─> Send to frontend
 ```
@@ -130,30 +164,47 @@ PRAGMA synchronous = NORMAL;      -- Balanced safety/performance
 The implementation is **fully backward compatible**:
 
 1. **Automatic mode detection**
-   - If `sharp` is installed → BLOB mode enabled
-   - If `sharp` not available → Falls back to file-based mode
+   - If `sharp` is installed → Image processing enabled (resizing + compression)
+   - If `sharp` not available → Falls back to direct download (no processing)
+   - `useBlobStorage` setting controls storage location (BLOB vs file)
 
 2. **Hybrid support**
    - Database can contain both BLOB and file-based photos
    - `node_helper.js` checks for `cached_data` first, falls back to `cached_path`
    - Existing file caches continue to work
+   - Can switch between BLOB and file mode anytime
 
 3. **Gradual migration**
-   - New photos automatically use BLOB storage
-   - Old file-based photos remain accessible
+   - New photos automatically processed and stored per current settings
+   - Old photos remain accessible regardless of format
    - No migration script needed
+   - Cache naturally updates as photos are re-downloaded
 
 ## Performance Comparison
 
-### Raspberry Pi 5 (your setup)
+### Raspberry Pi 5
 
-| Operation | File-based | BLOB Storage | Improvement |
-|-----------|-----------|--------------|-------------|
-| **Download & Cache** | Stream → Disk | Stream → Resize → BLOB | -40% size |
+**With Sharp Installed:**
+
+| Operation | File Mode | BLOB Mode | BLOB Advantage |
+|-----------|-----------|-----------|----------------|
+| **Download & Cache** | Stream → Resize → File | Stream → Resize → BLOB | No file I/O overhead |
+| **Image Size** | ~680 KB (resized) | ~680 KB (resized) | Same |
 | **Retrieve Image** | DB Query + File Read | DB Query only | 50% faster |
 | **I/O Operations** | 2 operations | 1 operation | 50% less |
 | **Cache Cleanup** | Delete files + DB update | DB update only | Atomic |
 | **Disk Seeks** | 2 random seeks | 1 sequential read | Much faster |
+| **SD Card Wear** | Moderate | Low | Better for Pi |
+
+**Without Sharp Installed:**
+
+| Operation | File Mode | Notes |
+|-----------|-----------|-------|
+| **Download & Cache** | Stream → File | No resizing, original size (~3200 KB) |
+| **Retrieve Image** | DB Query + File Read | 2 operations |
+| **Cache Size** | Much larger | 70-80% more space used |
+
+**Recommendation:** Always install Sharp for automatic image optimization.
 
 ### Storage Efficiency
 

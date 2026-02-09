@@ -144,21 +144,56 @@ class CacheManager {
             return await this.processAndStoreBlob(photoId, stream);
           }
 
-          // Legacy mode: Save to file
+          // File mode: Save to file (with resizing if Sharp available)
           const cacheDir = this.config.cachePath || path.resolve(__dirname, "..", "cache", "images");
           await fs.promises.mkdir(cacheDir, { recursive: true });
 
           const filePath = path.join(cacheDir, `${photoId}.jpg`);
-          const writeStream = fs.createWriteStream(filePath);
 
-          await finished(stream.pipe(writeStream));
+          // If Sharp is available, resize even in file mode
+          if (sharp) {
+            // Stream to buffer
+            const chunks = [];
+            for await (const chunk of stream) {
+              chunks.push(chunk);
+            }
+            const originalBuffer = Buffer.concat(chunks);
 
-          const stats = await fs.promises.stat(filePath);
-          await this.db.updatePhotoCache(photoId, filePath, stats.size);
+            this.log(`[CACHE] Processing ${photoId} (${(originalBuffer.length / 1024).toFixed(2)}KB)`);
 
-          this.log(`[CACHE] Downloaded ${photoId} (${(stats.size / 1024).toFixed(2)}KB)`);
+            // Resize and compress with sharp
+            const processedBuffer = await sharp(originalBuffer)
+              .resize(this.screenWidth, this.screenHeight, {
+                fit: 'inside',          // Maintain aspect ratio
+                withoutEnlargement: true // Don't upscale small images
+              })
+              .jpeg({
+                quality: this.jpegQuality,
+                progressive: true,
+                mozjpeg: true
+              })
+              .toBuffer();
 
-          return { success: true, photoId, size: stats.size };
+            // Write processed buffer to file
+            await fs.promises.writeFile(filePath, processedBuffer);
+
+            this.log(`[CACHE] Saved ${photoId}: ${(originalBuffer.length / 1024).toFixed(2)}KB → ${(processedBuffer.length / 1024).toFixed(2)}KB`);
+
+            await this.db.updatePhotoCache(photoId, filePath, processedBuffer.length);
+            return { success: true, photoId, size: processedBuffer.length };
+
+          } else {
+            // No Sharp - download directly without resizing
+            const writeStream = fs.createWriteStream(filePath);
+            await finished(stream.pipe(writeStream));
+
+            const stats = await fs.promises.stat(filePath);
+            await this.db.updatePhotoCache(photoId, filePath, stats.size);
+
+            this.log(`[CACHE] Downloaded ${photoId} (${(stats.size / 1024).toFixed(2)}KB) - no resizing (Sharp not available)`);
+
+            return { success: true, photoId, size: stats.size };
+          }
 
         } catch (error) {
           if (attempt === maxRetries) {
