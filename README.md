@@ -113,8 +113,8 @@ pm2 restart MagicMirror
 | `driveFolders[].id` | String/null | - | Folder ID from Drive URL. Use `null` for Drive root |
 | `driveFolders[].depth` | Number | `-1` | Folder scan depth: `-1` = infinite, `0` = folder only, `N` = N levels |
 | `updateInterval` | Number | `60000` | Photo change interval in milliseconds (minimum 10 seconds) |
-| `showWidth` | Number | `1080` | Display resolution width |
-| `showHeight` | Number | `1920` | Display resolution height |
+| `showWidth` | Number | `1080` | Display width in pixels (images resized to fit) |
+| `showHeight` | Number | `1920` | Display height in pixels (images resized to fit) |
 
 ### Advanced Settings
 
@@ -129,14 +129,28 @@ pm2 restart MagicMirror
 | `autoInfoPosition` | Boolean/Function | `false` | Auto-reposition photo info to prevent burn-in |
 | `debug` | Boolean | `false` | Enable verbose logging |
 
-### BLOB Storage Settings
+### Image Processing & Storage
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `useBlobStorage` | Boolean | `true` | Store images as BLOBs in SQLite (requires Sharp) |
-| `blobQuality` | Number | `80` | JPEG quality (1-100) for BLOB storage |
+| `blobQuality` | Number | `80` | JPEG quality (1-100) for image compression |
 
-See [BLOB_STORAGE_GUIDE.md](BLOB_STORAGE_GUIDE.md) for more details.
+**How it works (when Sharp is installed):**
+1. Photos are downloaded from Google Drive
+2. Sharp library resizes images to fit `showWidth` x `showHeight` (aspect ratio preserved)
+3. Resized images are compressed to JPEG at `blobQuality` %
+4. Images stored as BLOBs in SQLite (if `useBlobStorage: true`) or as files (if `false`)
+5. Result: ~70-80% smaller files, faster loading, less SD card wear
+
+**Without Sharp installed:**
+- Photos downloaded directly without resizing or compression
+- Original file sizes retained (larger cache usage)
+- Stored as files in `cache/images/` folder
+
+**Recommendation:** Install Sharp (`npm install sharp`) for automatic image optimization.
+
+See [BLOB_STORAGE_GUIDE.md](BLOB_STORAGE_GUIDE.md) for complete details.
 
 ### Removed Options (Not Yet Implemented in V3)
 
@@ -497,6 +511,137 @@ A: The module automatically evicts the least-recently-viewed photos.
 
 **Q: Can I use photos from shared drives?**
 A: Yes, as long as you have read access to the folder.
+
+---
+
+## Testing & Development
+
+### Available Test Scripts
+
+The module includes several test scripts for validation and development:
+
+#### 1. Comprehensive Test Suite
+
+```bash
+cd ~/MagicMirror/modules/MMM-GooglePhotos
+node test_v3_standalone.js
+```
+
+**What it tests:**
+- Google Drive API authentication
+- Folder scanning (with depth control)
+- Photo database operations
+- Cache management (file-based and BLOB)
+- All 4 sort modes (sequential, random, newest, oldest)
+- Changes API (incremental scanning)
+- Image download and processing
+
+**Prerequisites:**
+- OAuth credentials (`google_drive_auth.json`)
+- Valid token (`token_drive.json`)
+- Edit folder ID in script before running
+
+#### 2. Quick Test (Pre-configured)
+
+```bash
+cd ~/MagicMirror/modules/MMM-GooglePhotos
+node quick-test.js
+```
+
+**What it does:**
+- Quick validation of basic functionality
+- Uses configuration from `test-config.json`
+- Faster than comprehensive test suite
+
+**Setup:**
+1. Copy `test-config.json.example` to `test-config.json`
+2. Edit with your folder ID
+3. Run the script
+
+#### 3. BLOB Storage Test
+
+```bash
+cd ~/MagicMirror/modules/MMM-GooglePhotos
+npm install sharp  # Required for BLOB storage
+node test_blob_storage.js
+```
+
+**What it tests:**
+- Sharp image processing
+- BLOB storage in SQLite
+- Image resizing and compression
+- Performance comparison (BLOB vs file-based)
+
+#### 4. Jest Unit Tests
+
+```bash
+cd ~/MagicMirror/modules/MMM-GooglePhotos
+npm install  # Install dev dependencies
+npm test     # Run all tests with coverage
+```
+
+**Test commands:**
+- `npm test` - Run all tests with coverage report
+- `npm run test:unit` - Run unit tests only
+- `npm run test:integration` - Run integration tests only
+- `npm run test:watch` - Watch mode for development
+
+**What it tests:**
+- `PhotoDatabase` - Database operations, sort modes, cache management
+- `CacheManager` - Cache eviction, BLOB storage, size limits
+- `full-workflow` - End-to-end integration test
+
+#### 5. Linting
+
+```bash
+npm run lint:js
+```
+
+Runs ESLint with auto-fix to ensure code quality.
+
+### Test Configuration
+
+Most test scripts require a configuration file. Create `test-config.json`:
+
+```json
+{
+  "driveFolders": [
+    {
+      "id": "YOUR_FOLDER_ID_HERE",
+      "depth": -1
+    }
+  ],
+  "keyFilePath": "./google_drive_auth.json",
+  "tokenPath": "./token_drive.json",
+  "maxCacheSizeMB": 200,
+  "useBlobStorage": true,
+  "sortMode": "sequential"
+}
+```
+
+### Development Workflow
+
+1. **Setup:** Generate OAuth credentials and token
+2. **Unit tests:** `npm run test:unit` (fast, no API calls)
+3. **Integration tests:** `npm run test:integration` (requires API access)
+4. **Standalone tests:** `node test_v3_standalone.js` (full validation)
+5. **Lint:** `npm run lint:js` (ensure code quality)
+
+### Test Output Examples
+
+**Successful test run:**
+```
+[2025-02-08T12:00:00.000Z] ℹ️  TEST: Sequential Sort Mode
+[2025-02-08T12:00:00.100Z] ✅ Sort mode test passed
+[2025-02-08T12:00:00.200Z] ℹ️  TEST: Random Sort Mode
+[2025-02-08T12:00:00.300Z] ✅ Sort mode test passed
+```
+
+**Failed authentication:**
+```
+❌ Error: Authentication failed
+   Check google_drive_auth.json and token_drive.json
+```
 
 ---
 
