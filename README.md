@@ -318,9 +318,9 @@ config: {
 ### Architecture
 
 ```
-Google Drive Folders
+Cloud Storage (Google Drive / OneDrive / etc)
     ↓
-GDriveAPI scans folders (with depth control)
+Provider scans folders (with depth control)
     ↓
 PhotoDatabase stores metadata (SQLite)
     ↓
