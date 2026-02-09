@@ -2,8 +2,18 @@
 
 const fs = require("fs");
 const path = require("path");
+const dns = require("dns").promises;
 const axios = require("axios");
 const BaseProvider = require("./BaseProvider");
+
+/**
+ * Sleep helper function
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>}
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 /**
  * OneDrive Provider for MMM-CloudPhotos
@@ -122,32 +132,70 @@ class OneDriveProvider extends BaseProvider {
   }
 
   /**
-   * Make authenticated request to Microsoft Graph API
+   * Check if device is online
+   * @returns {Promise<boolean>}
+   */
+  async isOnline() {
+    try {
+      await dns.resolve("microsoft.com");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Make authenticated request to Microsoft Graph API with retry logic
    * @param {string} endpoint - API endpoint (e.g., "/me/drive")
    * @param {Object} options - Axios options
+   * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
    * @returns {Promise<Object>} Response data
    */
-  async makeRequest(endpoint, options = {}) {
+  async makeRequest(endpoint, options = {}, maxRetries = 3) {
+    // Check if online before attempting request
+    if (!(await this.isOnline())) {
+      this.log("[ONEDRIVE] Device is offline, skipping request");
+      throw new Error("Device is offline");
+    }
+
     // Refresh token if needed
     if (Date.now() >= this.tokenExpiry - 300000) {
       await this.refreshAccessToken();
     }
 
-    try {
-      const response = await axios({
-        method: options.method || "GET",
-        url: `${this.apiBase}${endpoint}`,
-        headers: {
-          Authorization: `Bearer ${this.accessToken}`,
-          ...options.headers
-        },
-        ...options
-      });
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      try {
+        const response = await axios({
+          method: options.method || "GET",
+          url: `${this.apiBase}${endpoint}`,
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+            ...options.headers
+          },
+          ...options
+        });
 
-      return response.data;
-    } catch (error) {
-      this.log(`[ONEDRIVE] API request failed: ${endpoint}`, error.message);
-      throw error;
+        return response.data;
+      } catch (error) {
+        attempt++;
+
+        // Determine if error is retryable
+        const isNetworkError = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN'].includes(error.code);
+        const isServerError = error.response?.status >= 500 && error.response?.status < 600;
+        const isRateLimited = error.response?.status === 429;
+        const shouldRetry = (isNetworkError || isServerError || isRateLimited) && attempt < maxRetries;
+
+        if (!shouldRetry) {
+          this.log(`[ONEDRIVE] API request failed (attempt ${attempt}/${maxRetries}): ${endpoint}`, error.message);
+          throw error;
+        }
+
+        // Exponential backoff: 2s, 4s, 8s... (max 60s)
+        const delay = Math.min(1000 * Math.pow(2, attempt), 60000);
+        this.log(`[ONEDRIVE] Request failed (${error.code || error.response?.status}), retrying in ${delay}ms (attempt ${attempt}/${maxRetries})`);
+        await sleep(delay);
+      }
     }
   }
 
@@ -217,6 +265,11 @@ class OneDriveProvider extends BaseProvider {
         }
 
         nextLink = data["@odata.nextLink"];
+
+        // Small delay between pagination requests to avoid rate limiting
+        if (nextLink) {
+          await sleep(500);
+        }
       } while (nextLink);
 
       this.log(`[ONEDRIVE] Folder scan complete. Total photos: ${photos.length}`);
@@ -362,6 +415,11 @@ class OneDriveProvider extends BaseProvider {
           break;
         }
 
+        // Small delay between pagination requests to avoid rate limiting
+        if (nextLink) {
+          await sleep(500);
+        }
+
       } while (nextLink);
 
       this.log(`[ONEDRIVE] Incremental sync complete. Processed ${changeCount} changes, found ${changedPhotos.length} photos, ${deletedIds.length} deleted`);
@@ -392,6 +450,7 @@ class OneDriveProvider extends BaseProvider {
       // If no delta link yet, follow pagination to get it
       let nextLink = data["@odata.nextLink"];
       while (nextLink && !deltaLink) {
+        await sleep(500); // Delay between pagination requests
         const pageData = await this.makeRequest(nextLink.replace(this.apiBase, ""));
         deltaLink = pageData["@odata.deltaLink"];
         nextLink = pageData["@odata.nextLink"];

@@ -1,5 +1,50 @@
 # Changelog
 
+## Version 3.1.1 - OneDrive Reliability Improvements (2025-02-09)
+
+### 🔧 Improvements
+
+**Enhanced OneDrive Provider Reliability**
+
+Adopted best practices from MMM-OneDrive module to improve network reliability and error handling:
+
+1. **Retry Logic with Exponential Backoff**
+   - Automatic retry for network errors, server errors (5xx), and rate limiting (429)
+   - Exponential backoff: 2s → 4s → 8s (max 60s)
+   - 3 retry attempts before failing
+   - Handles: `ECONNRESET`, `ETIMEDOUT`, `ENOTFOUND`, `EAI_AGAIN`
+
+2. **Online Detection**
+   - Checks internet connectivity before API calls
+   - DNS resolution test to microsoft.com
+   - Graceful handling when offline
+
+3. **Rate Limit Protection**
+   - 500ms delay between pagination requests
+   - Prevents API throttling during large folder scans
+   - Applied to: folder scanning, delta sync, token initialization
+
+4. **Better Error Handling**
+   - Specific error type detection
+   - Informative retry messages
+   - Distinguishes between retryable and non-retryable errors
+
+#### Technical Details
+
+- Updated `makeRequest()` method with retry logic
+- Added `isOnline()` helper using DNS resolution
+- Added `sleep()` delays between paginated API calls
+- Improved logging with retry attempt counts
+
+#### Impact
+
+- **More reliable** operation on unstable networks
+- **Automatic recovery** from transient errors
+- **Better user experience** with clear error messages
+- **Protection against** API rate limiting
+
+---
+
 ## Version 3.1.0 - OneDrive Provider (2025-02-09)
 
 ### ✨ New Features
