@@ -19,8 +19,8 @@ Complete step-by-step instructions for installing MMM-GooglePhotos V3 (Google Dr
 
 ```bash
 cd ~/MagicMirror/modules
-git clone https://github.com/YOUR_USERNAME/MMM-GooglePhotos-fork.git MMM-GooglePhotos
-cd MMM-GooglePhotos
+git clone https://github.com/chris1dickson/MMM-CloudPhotos.git MMM-CloudPhotos
+cd MMM-CloudPhotos
 npm install
 ```
 
@@ -28,8 +28,8 @@ npm install
 
 ```bash
 cd ~/MagicMirror/modules
-git clone https://github.com/YOUR_USERNAME/MMM-GooglePhotos-fork.git MMM-GooglePhotos
-docker exec -it -w /opt/magic_mirror/modules/MMM-GooglePhotos magic_mirror npm install
+git clone https://github.com/chris1dickson/MMM-CloudPhotos.git MMM-CloudPhotos
+docker exec -it -w /opt/magic_mirror/modules/MMM-CloudPhotos magic_mirror npm install
 ```
 
 ---
