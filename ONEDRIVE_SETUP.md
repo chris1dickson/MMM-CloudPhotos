@@ -460,7 +460,7 @@ Use both Google Drive and OneDrive:
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/MMM-CloudPhotos/issues)
+- **Issues**: [GitHub Issues](https://github.com/chris1dickson/MMM-CloudPhotos/issues)
 - **Discussions**: [MagicMirror Forum](https://forum.magicmirror.builders)
 - **Microsoft Graph API**: [Documentation](https://docs.microsoft.com/en-us/graph/api/resources/onedrive)
 

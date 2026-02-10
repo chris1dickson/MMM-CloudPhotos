@@ -39,7 +39,7 @@ Display your photos from **cloud storage providers** on [MagicMirror²](https://
 
 ```bash
 cd ~/MagicMirror/modules
-git clone https://github.com/YOUR_USERNAME/MMM-CloudPhotos-fork.git MMM-CloudPhotos
+git clone https://github.com/chris1dickson/MMM-CloudPhotos.git MMM-CloudPhotos
 cd MMM-CloudPhotos
 npm install
 ```
@@ -745,7 +745,8 @@ MIT
 ## Credits
 
 - Original module by [@eouia](https://github.com/eouia)
-- Current maintainer: [@hermanho](https://github.com/hermanho)
+- Previous maintainer: [@hermanho](https://github.com/hermanho)
+- Current maintainer: [@chris1dickson](https://github.com/chris1dickson)
 - V3 Drive migration and enhancements
 
 ---
@@ -753,7 +754,7 @@ MIT
 ## Support
 
 - Check the documentation above
-- Review [Issues](https://github.com/YOUR_USERNAME/MMM-CloudPhotos-fork/issues)
+- Review [Issues](https://github.com/chris1dickson/MMM-CloudPhotos/issues)
 - For Google API questions, see [Google Drive API docs](https://developers.google.com/drive)
 
 ---
