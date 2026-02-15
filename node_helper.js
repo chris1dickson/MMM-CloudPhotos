@@ -54,14 +54,6 @@ const NodeHelperObject = {
         }
         break;
 
-      case "NEED_MORE_PICS":
-        this.log_debug("Frontend needs more photos");
-        await this.sendNextPhoto();
-        break;
-
-      case "MODULE_SUSPENDED_SKIP_UPDATE":
-        this.log_debug("Module is suspended");
-        break;
 
       case "GET_CACHE_STATS":
         await this.sendCacheStats();
@@ -151,9 +143,6 @@ const NodeHelperObject = {
 
       this.initialized = true;
       this.log_info("✅ Initialization complete!");
-
-      // Send success notification to frontend
-      this.sendSocketNotification("INITIALIZED", { success: true });
 
       // Start initial scan
       await this.performInitialScan();
