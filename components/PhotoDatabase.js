@@ -169,7 +169,18 @@ class PhotoDatabase {
    */
   async savePhoto(photo) {
     try {
-      const creationTime = photo.createdTime ? new Date(photo.createdTime).getTime() : Date.now();
+      // Use EXIF time from imageMediaMetadata if available, fallback to file createdTime, then null
+      // EXIF time format is "YYYY:MM:DD HH:mm:ss", need to convert to ISO format
+      let creationTime = null;
+      if (photo.imageMediaMetadata?.time) {
+        // Convert EXIF format "2015:05:31 12:39:50" to ISO format "2015-05-31T12:39:50"
+        const exifTime = photo.imageMediaMetadata.time.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+        creationTime = new Date(exifTime).getTime();
+      } else if (photo.createdTime) {
+        creationTime = new Date(photo.createdTime).getTime();
+      }
+      // If no time available, leave as null - frontend will fall back to filename
+
       const width = photo.imageMediaMetadata?.width || null;
       const height = photo.imageMediaMetadata?.height || null;
       const folderId = photo.parents?.[0] || "root";

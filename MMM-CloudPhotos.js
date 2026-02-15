@@ -21,7 +21,7 @@ Module.register("MMM-CloudPhotos", {
     },
     showWidth: 1080, // These values will be used for quality of downloaded photos to show. real size to show in your MagicMirror region is recommended.
     showHeight: 1920,
-    timeFormat: "YYYY/MM/DD HH:mm",
+    timeFormat: "relative", // Use "relative" for "3 years ago" style, or a moment format like "YYYY/MM/DD HH:mm"
     autoInfoPosition: false,
   },
   requiresVersion: "2.24.0",
@@ -182,8 +182,8 @@ Module.register("MMM-CloudPhotos", {
         let infoText = document.createElement("div");
         infoText.classList.add("infoText");
 
-        // Check if we have any metadata to display
-        const hasMetadata = photo.creation_time || photo.location_name;
+        // Check if we have BOTH metadata fields
+        const hasBothMetadata = photo.creation_time && photo.location_name;
 
         // Add photo time
         if (photo.creation_time) {
@@ -200,12 +200,12 @@ Module.register("MMM-CloudPhotos", {
         if (photo.location_name) {
           let location = document.createElement("div");
           location.classList.add("photoLocation");
-          location.innerHTML = `📍 ${photo.location_name}`;
+          location.innerHTML = photo.location_name;
           infoText.appendChild(location);
         }
 
-        // Fallback to filename if no metadata available
-        if (!hasMetadata && photo.filename) {
+        // Fallback to filename if EITHER location OR date is missing
+        if (!hasBothMetadata && photo.filename) {
           let filename = document.createElement("div");
           filename.classList.add("photoFilename");
           filename.innerHTML = photo.filename;
