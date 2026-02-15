@@ -174,10 +174,10 @@ class PhotoDatabase {
       const height = photo.imageMediaMetadata?.height || null;
       const folderId = photo.parents?.[0] || "root";
 
-      // Extract location data if available
-      const latitude = photo.imageMediaMetadata?.location?.latitude || null;
-      const longitude = photo.imageMediaMetadata?.location?.longitude || null;
-      const altitude = photo.imageMediaMetadata?.location?.altitude || null;
+      // Extract location data if available (safely handle missing imageMediaMetadata)
+      const latitude = photo.imageMediaMetadata?.location?.latitude ?? null;
+      const longitude = photo.imageMediaMetadata?.location?.longitude ?? null;
+      const altitude = photo.imageMediaMetadata?.location?.altitude ?? null;
 
       await this.db.run(`
         INSERT INTO photos (id, folder_id, filename, creation_time, width, height, latitude, longitude, altitude)
