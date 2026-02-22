@@ -39,9 +39,8 @@ describe("BLOB Storage Bugs - Bug #4 & #5", () => {
     db = new PhotoDatabase(dbPath, mockLogger, { sortMode: "sequential" });
     await db.initialize();
 
-    // Initialize CacheManager with BLOB storage enabled
+    // Initialize CacheManager
     const config = {
-      useBlobStorage: true,  // Enable BLOB mode
       maxCacheSizeMB: 1,     // 1 MB limit for testing
       showWidth: 800,
       showHeight: 600
@@ -108,32 +107,6 @@ describe("BLOB Storage Bugs - Bug #4 & #5", () => {
 
       // After fix, this should pass:
       expect(reportedSize).toBe(150000);
-    });
-
-    test("getCacheSizeBytes() works correctly for FILE-based storage (control test)", async () => {
-      // Add photos
-      const photos = [
-        { id: "photo1", name: "photo1.jpg", parents: ["folder1"] },
-        { id: "photo2", name: "photo2.jpg", parents: ["folder1"] }
-      ];
-
-      await db.savePhotos(photos);
-
-      // Simulate FILE-based storage
-      for (const photo of photos) {
-        await db.db.run(`
-          UPDATE photos
-          SET cached_path = ?,
-              cached_size_bytes = ?,
-              cached_at = ?
-          WHERE id = ?
-        `, [`/cache/${photo.id}.jpg`, 50000, Date.now(), photo.id]);
-      }
-
-      const reportedSize = await db.getCacheSizeBytes();
-
-      // This works correctly for file-based storage
-      expect(reportedSize).toBe(100000); // 2 * 50KB = 100KB ✅
     });
 
     test("Cache size calculation affects eviction trigger", async () => {
@@ -247,12 +220,12 @@ describe("BLOB Storage Bugs - Bug #4 & #5", () => {
       console.log(`  Actual photos evicted: ${cachedBefore - cachedAfter}`);
       console.log(`  Log message: "${evictionLog}"`);
 
-      // FIXED: Log should say "Evicted 5 BLOB photos"
-      expect(evictionLog).toContain("Evicted 5 BLOB photos");
+      // FIXED: Log should say "Evicted 5 photos"
+      expect(evictionLog).toContain("Evicted 5 photos");
     });
 
-    test("evictOldest() correctly handles BLOB storage without file deletion (FIXED)", async () => {
-      // Add photos with BLOB storage (no files)
+    test("evictOldest() correctly evicts BLOB photos (FIXED)", async () => {
+      // Add photos with BLOB storage
       const photos = [
         { id: "photo1", name: "photo1.jpg", parents: ["folder1"] },
         { id: "photo2", name: "photo2.jpg", parents: ["folder1"] },
@@ -274,63 +247,22 @@ describe("BLOB Storage Bugs - Bug #4 & #5", () => {
         `, [fakeJpegData, Date.now(), Date.now(), photo.id]);
       }
 
-      // Get photos to evict (should have cached_path = null)
-      const photosToEvict = await db.getOldestCachedPhotos(3);
+      // Verify all 3 are cached before eviction
+      const cachedBefore = await db.getCachedPhotoCount();
+      expect(cachedBefore).toBe(3);
 
-      console.log("\n✅ Bug #4 FIXED - File Handling:");
-      console.log(`  Photos to evict: ${photosToEvict.length}`);
-      photosToEvict.forEach((p, i) => {
-        console.log(`    Photo ${i + 1}: id="${p.id}", cached_path=${p.cached_path}, has BLOB=${p.cached_data !== null}`);
-      });
+      console.log("\n✅ Bug #4 FIXED - Eviction:");
+      console.log(`  Photos before eviction: ${cachedBefore}`);
 
-      // FIXED: evictOldest will NOT try to delete files for BLOB photos
-      // It will skip file deletion and only clear database
+      // Evict 3 photos
+      await cacheManager.evictOldest(3);
 
-      // Count file deletion attempts
-      const filePhotos = photosToEvict.filter(p => p.cached_path !== null).length;
-      const blobPhotos = photosToEvict.filter(p => p.cached_data !== null).length;
+      // Verify all 3 were evicted
+      const cachedAfter = await db.getCachedPhotoCount();
+      expect(cachedAfter).toBe(0);
 
-      expect(filePhotos).toBe(0); // No files to delete
-      expect(blobPhotos).toBe(3); // All are BLOBs
-
-      console.log(`  File-based photos: ${filePhotos} (no file deletion needed)`);
-      console.log(`  BLOB photos: ${blobPhotos}`);
-      console.log(`  FIXED: evictOldest() will skip file deletion for BLOB photos ✅`);
-    });
-
-    test("evictOldest() works correctly for FILE-based storage (control test)", async () => {
-      // Add photos with FILE storage
-      const photos = [
-        { id: "photo1", name: "photo1.jpg", parents: ["folder1"] },
-        { id: "photo2", name: "photo2.jpg", parents: ["folder1"] }
-      ];
-
-      await db.savePhotos(photos);
-
-      // Create actual files
-      for (const photo of photos) {
-        const filePath = path.join(testDir, `${photo.id}.jpg`);
-        await fs.writeFile(filePath, Buffer.alloc(10000, 0xFF));
-
-        await db.db.run(`
-          UPDATE photos
-          SET cached_path = ?,
-              cached_size_bytes = ?,
-              cached_at = ?,
-              last_viewed_at = ?
-          WHERE id = ?
-        `, [filePath, 10000, Date.now(), Date.now(), photo.id]);
-      }
-
-      logs = [];
-
-      // Evict files
-      await cacheManager.evictOldest(2);
-
-      const evictionLog = logs.find(log => log.includes("Evicted"));
-
-      // For file-based storage, this works correctly
-      expect(evictionLog).toContain("Evicted 2 file-based photos"); // ✅ Works for files
+      console.log(`  Photos after eviction: ${cachedAfter}`);
+      console.log(`  FIXED: evictOldest() correctly cleared BLOB data ✅`);
     });
   });
 

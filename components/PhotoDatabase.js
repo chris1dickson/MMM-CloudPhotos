@@ -123,12 +123,10 @@ class PhotoDatabase {
           -- Simple view tracking (no analytics)
           last_viewed_at INTEGER,
 
-          -- Cache tracking (legacy file-based)
-          cached_path TEXT,
+          -- Cache tracking (timestamp)
           cached_at INTEGER,
-          cached_size_bytes INTEGER,
 
-          -- BLOB storage (new efficient storage)
+          -- BLOB storage (efficient in-database storage)
           cached_data BLOB,
           cached_mime_type TEXT
         );
@@ -140,14 +138,11 @@ class PhotoDatabase {
         );
 
         -- Optimized indexes for BLOB storage
-        CREATE INDEX IF NOT EXISTS idx_display_blob ON photos(last_viewed_at)
+        CREATE INDEX IF NOT EXISTS idx_display ON photos(last_viewed_at)
           WHERE cached_data IS NOT NULL;
 
-        CREATE INDEX IF NOT EXISTS idx_display_file ON photos(cached_path, last_viewed_at)
-          WHERE cached_path IS NOT NULL;
-
         CREATE INDEX IF NOT EXISTS idx_prefetch ON photos(last_viewed_at)
-          WHERE cached_data IS NULL AND cached_path IS NULL;
+          WHERE cached_data IS NULL;
       `);
 
       // Optimize SQLite for BLOB storage
@@ -285,9 +280,9 @@ class PhotoDatabase {
       }
 
       const photo = await this.db.get(`
-        SELECT id, cached_path, cached_data, filename, width, height, creation_time, latitude, longitude, altitude, location_name
+        SELECT id, cached_data, filename, width, height, creation_time, latitude, longitude, altitude, location_name
         FROM photos
-        WHERE (cached_data IS NOT NULL OR cached_path IS NOT NULL)
+        WHERE cached_data IS NOT NULL
         ORDER BY ${orderBy}
         LIMIT 1
       `);
@@ -338,7 +333,7 @@ class PhotoDatabase {
   }
 
   /**
-   * Get photos that need caching (no cached_path)
+   * Get photos that need caching (not yet cached as BLOB)
    * @param {number} limit - Maximum number to return
    * @returns {Promise<Array>} Array of photos
    */
@@ -347,7 +342,7 @@ class PhotoDatabase {
       const photos = await this.db.all(`
         SELECT id, filename
         FROM photos
-        WHERE cached_path IS NULL
+        WHERE cached_data IS NULL
         ORDER BY last_viewed_at ASC NULLS FIRST
         LIMIT ?
       `, [limit]);
@@ -361,28 +356,7 @@ class PhotoDatabase {
   }
 
   /**
-   * Update cache information for a photo (legacy file-based)
-   * @param {string} photoId - Photo ID
-   * @param {string} cachedPath - Path to cached file
-   * @param {number} sizeBytes - File size in bytes
-   * @returns {Promise<void>}
-   */
-  async updatePhotoCache(photoId, cachedPath, sizeBytes) {
-    try {
-      await this.db.run(`
-        UPDATE photos
-        SET cached_path = ?, cached_at = ?, cached_size_bytes = ?
-        WHERE id = ?
-      `, [cachedPath, Date.now(), sizeBytes, photoId]);
-
-    } catch (error) {
-      this.log(`[DB] Error updating cache for ${photoId}:`, error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Store photo as BLOB (new efficient method)
+   * Store photo as BLOB
    * @param {string} photoId - Photo ID
    * @param {Buffer} imageBuffer - Processed image buffer
    * @param {string} mimeType - MIME type (e.g., 'image/jpeg')
@@ -396,11 +370,9 @@ class PhotoDatabase {
         UPDATE photos
         SET cached_data = ?,
             cached_mime_type = ?,
-            cached_at = ?,
-            cached_size_bytes = ?,
-            cached_path = NULL
+            cached_at = ?
         WHERE id = ?
-      `, [imageBuffer, mimeType, Date.now(), sizeBytes, photoId]);
+      `, [imageBuffer, mimeType, Date.now(), photoId]);
 
       this.log(`[DB] Stored BLOB for ${photoId}: ${(sizeBytes / 1024).toFixed(2)}KB`);
 
@@ -440,9 +412,7 @@ class PhotoDatabase {
     try {
       await this.db.run(`
         UPDATE photos
-        SET cached_path = NULL,
-            cached_at = NULL,
-            cached_size_bytes = NULL,
+        SET cached_at = NULL,
             cached_data = NULL,
             cached_mime_type = NULL
         WHERE id = ?
@@ -455,21 +425,17 @@ class PhotoDatabase {
   }
 
   /**
-   * Get oldest cached photos for eviction (both BLOB and file-based)
-   * Returns minimal data (not the actual BLOB) to identify storage type
+   * Get oldest cached photos for eviction (BLOB storage)
+   * Returns photo IDs only (not the actual BLOB data)
    * @param {number} limit - Number of photos to return
-   * @returns {Promise<Array>} Array of photos with cache info
+   * @returns {Promise<Array>} Array of photo IDs
    */
   async getOldestCachedPhotos(limit = 10) {
     try {
       const photos = await this.db.all(`
-        SELECT
-          id,
-          cached_path,
-          cached_size_bytes,
-          CASE WHEN cached_data IS NOT NULL THEN 1 ELSE NULL END as cached_data
+        SELECT id
         FROM photos
-        WHERE cached_data IS NOT NULL OR cached_path IS NOT NULL
+        WHERE cached_data IS NOT NULL
         ORDER BY last_viewed_at ASC
         LIMIT ?
       `, [limit]);
@@ -483,19 +449,15 @@ class PhotoDatabase {
   }
 
   /**
-   * Get total cache size in bytes
-   * Supports both file-based and BLOB storage modes
+   * Get total cache size in bytes (BLOB storage)
    * @returns {Promise<number>} Total size in bytes
    */
   async getCacheSizeBytes() {
     try {
       const result = await this.db.get(`
-        SELECT
-          COALESCE(SUM(cached_size_bytes), 0) +
-          COALESCE(SUM(LENGTH(cached_data)), 0)
-          as total_size
+        SELECT COALESCE(SUM(LENGTH(cached_data)), 0) as total_size
         FROM photos
-        WHERE cached_path IS NOT NULL OR cached_data IS NOT NULL
+        WHERE cached_data IS NOT NULL
       `);
 
       return result?.total_size || 0;
@@ -515,7 +477,7 @@ class PhotoDatabase {
       const result = await this.db.get(`
         SELECT COUNT(*) as count
         FROM photos
-        WHERE cached_data IS NOT NULL OR cached_path IS NOT NULL
+        WHERE cached_data IS NOT NULL
       `);
 
       return result?.count || 0;

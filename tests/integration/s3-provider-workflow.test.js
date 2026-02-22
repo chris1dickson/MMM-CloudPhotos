@@ -397,8 +397,8 @@ describe('S3Provider Integration Tests', () => {
 
       expect(await database.getTotalPhotoCount()).toBe(3);
 
-      // Step 2: Mark some photos as cached
-      await database.updatePhotoCache('vacation/beach1.jpg', 'beach1.jpg', 1024000);
+      // Step 2: Mark some photos as cached (BLOB storage)
+      await database.updatePhotoCacheBlob('vacation/beach1.jpg', Buffer.alloc(1024000, 0xFF), 'image/jpeg');
 
       // Step 3: Get uncached photos
       const uncached = await database.getPhotosToCache(10);
@@ -411,8 +411,8 @@ describe('S3Provider Integration Tests', () => {
       const stream = await provider.downloadPhoto(uncached[0].id);
       expect(stream).toBeDefined();
 
-      // Step 5: Mark as cached
-      await database.updatePhotoCache(uncached[0].id, 'cached-file.jpg', 1024000);
+      // Step 5: Mark as cached (BLOB storage)
+      await database.updatePhotoCacheBlob(uncached[0].id, Buffer.alloc(1024000, 0xFF), 'image/jpeg');
 
       // Verify cached count increased
       const cachedCount = await database.getCachedPhotoCount();

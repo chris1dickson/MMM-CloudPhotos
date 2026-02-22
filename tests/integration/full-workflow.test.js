@@ -153,14 +153,8 @@ describe('Integration: Full Workflow', () => {
     const photo1 = await db.getNextPhoto();
     expect(photo1).toBeDefined();
 
-    // Photo should be cached either as BLOB or file
-    const isCached = photo1.cached_data || photo1.cached_path;
-    expect(isCached).toBeTruthy();
-
-    // If using file storage, verify file exists
-    if (photo1.cached_path) {
-      expect(fs.existsSync(photo1.cached_path)).toBe(true);
-    }
+    // Photo should be cached as BLOB
+    expect(photo1.cached_data).toBeTruthy();
 
     // Mark as viewed
     await db.markPhotoViewed(photo1.id);

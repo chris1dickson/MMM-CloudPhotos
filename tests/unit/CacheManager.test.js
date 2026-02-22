@@ -248,21 +248,17 @@ describe('CacheManager', () => {
   });
 
   describe('Cache Eviction', () => {
-    test('should evict oldest photos', async () => {
+    test('should evict oldest photos (BLOB storage)', async () => {
       mockDb.getOldestCachedPhotos.mockResolvedValue([
-        { id: 'old1', cached_path: path.join(tempCachePath, 'old1.jpg') },
-        { id: 'old2', cached_path: path.join(tempCachePath, 'old2.jpg') }
+        { id: 'old1' },
+        { id: 'old2' }
       ]);
-
-      // Create dummy files
-      await fs.promises.writeFile(path.join(tempCachePath, 'old1.jpg'), 'data');
-      await fs.promises.writeFile(path.join(tempCachePath, 'old2.jpg'), 'data');
 
       await cacheManager.evictOldest(2);
 
       expect(mockDb.clearPhotoCache).toHaveBeenCalledTimes(2);
-      expect(fs.existsSync(path.join(tempCachePath, 'old1.jpg'))).toBe(false);
-      expect(fs.existsSync(path.join(tempCachePath, 'old2.jpg'))).toBe(false);
+      expect(mockDb.clearPhotoCache).toHaveBeenCalledWith('old1');
+      expect(mockDb.clearPhotoCache).toHaveBeenCalledWith('old2');
     });
 
     test('should trigger eviction when cache is full', async () => {
@@ -270,7 +266,7 @@ describe('CacheManager', () => {
       mockDb.getCacheSizeBytes.mockResolvedValue(maxSize + 1000000); // Over limit
       mockDb.getPhotosToCache.mockResolvedValue([]);
       mockDb.getOldestCachedPhotos.mockResolvedValue([
-        { id: 'old1', cached_path: '/path/old1.jpg' }
+        { id: 'old1' }
       ]);
 
       await cacheManager.tick();
@@ -280,17 +276,31 @@ describe('CacheManager', () => {
   });
 
   describe('Cleanup', () => {
-    test('should cleanup to target size', async () => {
-      mockDb.getCacheSizeBytes.mockResolvedValue(500 * 1024 * 1024); // 500MB
+    test('should cleanup to target size (BLOB storage)', async () => {
+      // Start at 500MB, then return 400MB after first batch, 300MB after second batch, 100MB after third batch
+      mockDb.getCacheSizeBytes
+        .mockResolvedValueOnce(500 * 1024 * 1024) // Initial size
+        .mockResolvedValueOnce(400 * 1024 * 1024) // After evicting first batch
+        .mockResolvedValueOnce(300 * 1024 * 1024) // After evicting second batch
+        .mockResolvedValueOnce(100 * 1024 * 1024); // After evicting third batch (under target)
+
       mockDb.getOldestCachedPhotos.mockResolvedValue([
-        { id: 'p1', cached_path: '/path/p1.jpg', cached_size_bytes: 100 * 1024 * 1024 },
-        { id: 'p2', cached_path: '/path/p2.jpg', cached_size_bytes: 100 * 1024 * 1024 },
-        { id: 'p3', cached_path: '/path/p3.jpg', cached_size_bytes: 100 * 1024 * 1024 }
+        { id: 'p1' },
+        { id: 'p2' },
+        { id: 'p3' },
+        { id: 'p4' },
+        { id: 'p5' },
+        { id: 'p6' },
+        { id: 'p7' },
+        { id: 'p8' },
+        { id: 'p9' },
+        { id: 'p10' }
       ]);
 
-      await cacheManager.cleanup(200);
+      await cacheManager.cleanup(200); // Target 200MB
 
-      expect(mockDb.clearPhotoCache).toHaveBeenCalledTimes(3);
+      // Should evict 3 batches of 10 photos each (30 total) to get under 200MB
+      expect(mockDb.clearPhotoCache).toHaveBeenCalledTimes(30);
     });
   });
 });

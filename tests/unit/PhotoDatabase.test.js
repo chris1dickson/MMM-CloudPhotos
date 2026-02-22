@@ -122,14 +122,14 @@ describe('PhotoDatabase', () => {
     });
 
     test('should update photo cache info', async () => {
-      await db.updatePhotoCache('cached123', '/path/to/cache.jpg', 1024000);
+      await db.updatePhotoCacheBlob('cached123', Buffer.alloc(1024000, 0xFF), 'image/jpeg');
 
       const cachedCount = await db.getCachedPhotoCount();
       expect(cachedCount).toBe(1);
     });
 
     test('should clear photo cache', async () => {
-      await db.updatePhotoCache('cached123', '/path/to/cache.jpg', 1024000);
+      await db.updatePhotoCacheBlob('cached123', Buffer.alloc(1024000, 0xFF), 'image/jpeg');
       await db.clearPhotoCache('cached123');
 
       const cachedCount = await db.getCachedPhotoCount();
@@ -144,7 +144,7 @@ describe('PhotoDatabase', () => {
     });
 
     test('should calculate cache size', async () => {
-      await db.updatePhotoCache('cached123', '/path/to/cache.jpg', 1024000);
+      await db.updatePhotoCacheBlob('cached123', Buffer.alloc(1024000, 0xFF), 'image/jpeg');
 
       const size = await db.getCacheSizeBytes();
       expect(size).toBe(1024000);
@@ -171,15 +171,15 @@ describe('PhotoDatabase', () => {
       ];
 
       await db.savePhotos(photos);
-      await db.updatePhotoCache('display1', '/path/photo1.jpg', 1024);
-      await db.updatePhotoCache('display2', '/path/photo2.jpg', 2048);
+      await db.updatePhotoCacheBlob('display1', Buffer.alloc(1024, 0xFF), 'image/jpeg');
+      await db.updatePhotoCacheBlob('display2', Buffer.alloc(2048, 0xFF), 'image/jpeg');
     });
 
-    test('should get next photo to display', async () => {
+    test('should get next photo to display (BLOB storage)', async () => {
       const photo = await db.getNextPhoto();
 
       expect(photo).toBeDefined();
-      expect(photo.cached_path).toBeTruthy();
+      expect(photo.cached_data).toBeTruthy();
     });
 
     test('should mark photo as viewed', async () => {
@@ -237,9 +237,9 @@ describe('PhotoDatabase', () => {
 
       await db.savePhotos(photos);
 
-      // Cache all photos
+      // Cache all photos (BLOB storage)
       for (let i = 0; i < 10; i++) {
-        await db.updatePhotoCache(`evict${i}`, `/path/photo${i}.jpg`, 1024 * (i + 1));
+        await db.updatePhotoCacheBlob(`evict${i}`, Buffer.alloc(1024 * (i + 1), 0xFF), 'image/jpeg');
       }
 
       // Mark some as viewed (to test LRU)

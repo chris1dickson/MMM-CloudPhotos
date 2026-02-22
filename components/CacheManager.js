@@ -44,10 +44,7 @@ class CacheManager {
     this.consecutiveFailures = 0;  // Track failures for graceful degradation
     this.tickInterval = 30000;     // Fixed 30-second tick
 
-    // BLOB storage mode (enabled when sharp is available)
-    this.useBlobStorage = sharp !== null && (config.useBlobStorage !== false);
-
-    // Image processing settings
+    // Image processing settings (BLOB storage with Sharp)
     this.screenWidth = config.showWidth || 1920;
     this.screenHeight = config.showHeight || 1080;
     this.jpegQuality = config.jpegQuality || 85;
@@ -58,10 +55,8 @@ class CacheManager {
     // Start the tick timer
     this.timer = setInterval(() => this.tick(), this.tickInterval);
 
-    this.log(`[CACHE] Cache manager initialized (BLOB mode: ${this.useBlobStorage ? 'enabled' : 'disabled'})`);
-    if (this.useBlobStorage) {
-      this.log(`[CACHE] Image processing: ${this.screenWidth}x${this.screenHeight} @ ${this.jpegQuality}% quality`);
-    }
+    this.log(`[CACHE] Cache manager initialized`);
+    this.log(`[CACHE] Image processing: ${this.screenWidth}x${this.screenHeight} @ ${this.jpegQuality}% quality`);
   }
 
   /**
@@ -186,68 +181,8 @@ class CacheManager {
 
           const stream = await provider.downloadPhoto(photoId, { timeout: 30000 });
 
-          // BLOB mode: Process and store in database
-          if (this.useBlobStorage) {
-            return await this.processAndStoreBlob(photoId, stream);
-          }
-
-          // File mode: Save to file (with resizing if Sharp available)
-          const cacheDir = this.config.cachePath || path.resolve(__dirname, "..", "cache", "images");
-          await fs.promises.mkdir(cacheDir, { recursive: true });
-
-          const filePath = path.join(cacheDir, `${photoId}.jpg`);
-
-          // If Sharp is available, resize even in file mode
-          if (sharp) {
-            // Stream to buffer
-            const chunks = [];
-            for await (const chunk of stream) {
-              chunks.push(chunk);
-            }
-            const originalBuffer = Buffer.concat(chunks);
-
-            this.log(`[CACHE] Processing ${photoId} (${(originalBuffer.length / 1024).toFixed(2)}KB)`);
-
-            // Resize and compress with sharp
-            const processedBuffer = await sharp(originalBuffer)
-              .resize(this.screenWidth, this.screenHeight, {
-                fit: 'inside',          // Maintain aspect ratio
-                withoutEnlargement: true // Don't upscale small images
-              })
-              .jpeg({
-                quality: this.jpegQuality,
-                progressive: true,
-                mozjpeg: true
-              })
-              .toBuffer();
-
-            // Write processed buffer to file
-            await fs.promises.writeFile(filePath, processedBuffer);
-
-            this.log(`[CACHE] Saved ${photoId}: ${(originalBuffer.length / 1024).toFixed(2)}KB → ${(processedBuffer.length / 1024).toFixed(2)}KB`);
-
-            await this.db.updatePhotoCache(photoId, filePath, processedBuffer.length);
-
-            // Perform reverse geocoding if photo has location data (fire and forget)
-            this.reverseGeocodePhoto(photoId).catch(() => {});
-
-            return { success: true, photoId, size: processedBuffer.length };
-
-          } else {
-            // No Sharp - download directly without resizing
-            const writeStream = fs.createWriteStream(filePath);
-            await finished(stream.pipe(writeStream));
-
-            const stats = await fs.promises.stat(filePath);
-            await this.db.updatePhotoCache(photoId, filePath, stats.size);
-
-            this.log(`[CACHE] Downloaded ${photoId} (${(stats.size / 1024).toFixed(2)}KB) - no resizing (Sharp not available)`);
-
-            // Perform reverse geocoding if photo has location data (fire and forget)
-            this.reverseGeocodePhoto(photoId).catch(() => {});
-
-            return { success: true, photoId, size: stats.size };
-          }
+          // Process and store in database as BLOB
+          return await this.processAndStoreBlob(photoId, stream);
 
         } catch (error) {
           if (attempt === maxRetries) {
@@ -312,8 +247,7 @@ class CacheManager {
   }
 
   /**
-   * Evict oldest cached photos
-   * Supports both file-based and BLOB storage modes
+   * Evict oldest cached photos (BLOB storage)
    * @param {number} count - Number of photos to evict
    * @returns {Promise<void>}
    */
@@ -328,36 +262,12 @@ class CacheManager {
         return;
       }
 
-      // Separate file-based and BLOB storage photos
-      const filePhotos = photos.filter(p => p.cached_path !== null);
-      const blobPhotos = photos.filter(p => p.cached_data !== null);
-
-      // Delete files only for file-based cache (skip BLOB photos)
-      let deletedFiles = 0;
-      if (filePhotos.length > 0) {
-        const deleteResults = await Promise.allSettled(
-          filePhotos.map(p => fs.promises.unlink(p.cached_path))
-        );
-        deletedFiles = deleteResults.filter(r => r.status === "fulfilled").length;
-
-        if (deletedFiles < filePhotos.length) {
-          this.log(`[CACHE] Warning: Only deleted ${deletedFiles}/${filePhotos.length} files`);
-        }
-      }
-
-      // Clear database cache for ALL photos (both file and BLOB)
+      // Clear BLOB data from database
       for (const photo of photos) {
         await this.db.clearPhotoCache(photo.id);
       }
 
-      // Accurate logging showing breakdown by storage type
-      if (filePhotos.length > 0 && blobPhotos.length > 0) {
-        this.log(`[CACHE] Evicted ${photos.length} photos (${filePhotos.length} files, ${blobPhotos.length} BLOBs)`);
-      } else if (filePhotos.length > 0) {
-        this.log(`[CACHE] Evicted ${photos.length} file-based photos`);
-      } else {
-        this.log(`[CACHE] Evicted ${photos.length} BLOB photos`);
-      }
+      this.log(`[CACHE] Evicted ${photos.length} photos`);
 
     } catch (error) {
       this.log("[CACHE] Eviction error:", error.message);
@@ -402,7 +312,7 @@ class CacheManager {
     try {
       this.log(`[CACHE] Manual cleanup to ${targetSizeMB}MB...`);
 
-      const currentSize = await this.db.getCacheSizeBytes();
+      let currentSize = await this.db.getCacheSizeBytes();
       const targetBytes = targetSizeMB * 1024 * 1024;
 
       if (currentSize <= targetBytes) {
@@ -410,27 +320,25 @@ class CacheManager {
         return;
       }
 
-      // Calculate how many photos to evict
-      const photos = await this.db.getOldestCachedPhotos(100);
+      // Evict photos in batches until under target
       let totalEvicted = 0;
-      let photosToEvict = [];
 
-      for (const photo of photos) {
-        photosToEvict.push(photo);
-        totalEvicted += photo.cached_size_bytes || 0;
+      while (currentSize > targetBytes) {
+        const photos = await this.db.getOldestCachedPhotos(10);
 
-        if ((currentSize - totalEvicted) <= targetBytes) {
-          break;
+        if (photos.length === 0) {
+          break; // No more photos to evict
         }
+
+        for (const photo of photos) {
+          await this.db.clearPhotoCache(photo.id);
+          totalEvicted++;
+        }
+
+        currentSize = await this.db.getCacheSizeBytes();
       }
 
-      // Evict selected photos
-      for (const photo of photosToEvict) {
-        await fs.promises.unlink(photo.cached_path).catch(() => {});
-        await this.db.clearPhotoCache(photo.id);
-      }
-
-      this.log(`[CACHE] Cleanup complete. Evicted ${photosToEvict.length} photos`);
+      this.log(`[CACHE] Cleanup complete. Evicted ${totalEvicted} photos`);
 
     } catch (error) {
       this.log("[CACHE] Cleanup error:", error.message);
