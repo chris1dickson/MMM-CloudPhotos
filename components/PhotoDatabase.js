@@ -456,13 +456,18 @@ class PhotoDatabase {
 
   /**
    * Get oldest cached photos for eviction (both BLOB and file-based)
+   * Returns minimal data (not the actual BLOB) to identify storage type
    * @param {number} limit - Number of photos to return
    * @returns {Promise<Array>} Array of photos with cache info
    */
   async getOldestCachedPhotos(limit = 10) {
     try {
       const photos = await this.db.all(`
-        SELECT id, cached_path, cached_size_bytes
+        SELECT
+          id,
+          cached_path,
+          cached_size_bytes,
+          CASE WHEN cached_data IS NOT NULL THEN 1 ELSE NULL END as cached_data
         FROM photos
         WHERE cached_data IS NOT NULL OR cached_path IS NOT NULL
         ORDER BY last_viewed_at ASC
@@ -479,14 +484,18 @@ class PhotoDatabase {
 
   /**
    * Get total cache size in bytes
+   * Supports both file-based and BLOB storage modes
    * @returns {Promise<number>} Total size in bytes
    */
   async getCacheSizeBytes() {
     try {
       const result = await this.db.get(`
-        SELECT COALESCE(SUM(cached_size_bytes), 0) as total_size
+        SELECT
+          COALESCE(SUM(cached_size_bytes), 0) +
+          COALESCE(SUM(LENGTH(cached_data)), 0)
+          as total_size
         FROM photos
-        WHERE cached_path IS NOT NULL
+        WHERE cached_path IS NOT NULL OR cached_data IS NOT NULL
       `);
 
       return result?.total_size || 0;

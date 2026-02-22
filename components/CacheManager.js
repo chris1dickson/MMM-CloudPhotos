@@ -313,6 +313,7 @@ class CacheManager {
 
   /**
    * Evict oldest cached photos
+   * Supports both file-based and BLOB storage modes
    * @param {number} count - Number of photos to evict
    * @returns {Promise<void>}
    */
@@ -327,19 +328,36 @@ class CacheManager {
         return;
       }
 
-      // Delete files in parallel (use allSettled to continue even if some fail)
-      const deleteResults = await Promise.allSettled(
-        photos.map(p => fs.promises.unlink(p.cached_path))
-      );
+      // Separate file-based and BLOB storage photos
+      const filePhotos = photos.filter(p => p.cached_path !== null);
+      const blobPhotos = photos.filter(p => p.cached_data !== null);
 
-      const deletedCount = deleteResults.filter(r => r.status === "fulfilled").length;
+      // Delete files only for file-based cache (skip BLOB photos)
+      let deletedFiles = 0;
+      if (filePhotos.length > 0) {
+        const deleteResults = await Promise.allSettled(
+          filePhotos.map(p => fs.promises.unlink(p.cached_path))
+        );
+        deletedFiles = deleteResults.filter(r => r.status === "fulfilled").length;
 
-      // Update database (clear cache info)
+        if (deletedFiles < filePhotos.length) {
+          this.log(`[CACHE] Warning: Only deleted ${deletedFiles}/${filePhotos.length} files`);
+        }
+      }
+
+      // Clear database cache for ALL photos (both file and BLOB)
       for (const photo of photos) {
         await this.db.clearPhotoCache(photo.id);
       }
 
-      this.log(`[CACHE] Evicted ${deletedCount}/${photos.length} photos`);
+      // Accurate logging showing breakdown by storage type
+      if (filePhotos.length > 0 && blobPhotos.length > 0) {
+        this.log(`[CACHE] Evicted ${photos.length} photos (${filePhotos.length} files, ${blobPhotos.length} BLOBs)`);
+      } else if (filePhotos.length > 0) {
+        this.log(`[CACHE] Evicted ${photos.length} file-based photos`);
+      } else {
+        this.log(`[CACHE] Evicted ${photos.length} BLOB photos`);
+      }
 
     } catch (error) {
       this.log("[CACHE] Eviction error:", error.message);
