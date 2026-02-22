@@ -144,6 +144,96 @@ const NodeHelperObject = {
   },
 
   /**
+   * Validate user configuration and provide helpful warnings
+   * @param {Object} config - User configuration
+   */
+  validateConfiguration: function (config) {
+    const warnings = [];
+    const errors = [];
+
+    // Validate display dimensions
+    if (config.showWidth !== undefined) {
+      const width = Number(config.showWidth);
+      if (isNaN(width) || width < 100 || width > 7680) {
+        warnings.push(`showWidth should be between 100 and 7680 pixels, got: ${config.showWidth}. Using default: 1920`);
+      }
+    }
+
+    if (config.showHeight !== undefined) {
+      const height = Number(config.showHeight);
+      if (isNaN(height) || height < 100 || height > 4320) {
+        warnings.push(`showHeight should be between 100 and 4320 pixels, got: ${config.showHeight}. Using default: 1080`);
+      }
+    }
+
+    // Validate JPEG quality
+    if (config.jpegQuality !== undefined) {
+      const quality = Number(config.jpegQuality);
+      if (isNaN(quality) || quality < 1 || quality > 100) {
+        warnings.push(`jpegQuality should be between 1 and 100, got: ${config.jpegQuality}. Using default: 85`);
+      }
+    }
+
+    // Validate sort mode
+    if (config.sortMode !== undefined) {
+      const validModes = ['sequential', 'random', 'newest', 'oldest'];
+      if (!validModes.includes(config.sortMode)) {
+        warnings.push(`Invalid sortMode: "${config.sortMode}". Valid options: ${validModes.join(', ')}. Using default: sequential`);
+      }
+    }
+
+    // Validate cache size
+    if (config.maxCacheSizeMB !== undefined) {
+      const cacheSize = Number(config.maxCacheSizeMB);
+      if (isNaN(cacheSize) || cacheSize < 10 || cacheSize > 10000) {
+        warnings.push(`maxCacheSizeMB should be between 10 and 10000 MB, got: ${config.maxCacheSizeMB}. Using default: 200`);
+      }
+    }
+
+    // Validate intervals
+    if (config.updateInterval !== undefined) {
+      const interval = Number(config.updateInterval);
+      if (isNaN(interval) || interval < 5000) {
+        warnings.push(`updateInterval should be at least 5000ms (5 seconds), got: ${config.updateInterval}. Using default: 60000`);
+      }
+    }
+
+    if (config.scanInterval !== undefined) {
+      const interval = Number(config.scanInterval);
+      if (isNaN(interval) || interval < 60000) {
+        warnings.push(`scanInterval should be at least 60000ms (1 minute), got: ${config.scanInterval}. Using default: 21600000 (6 hours)`);
+      }
+    }
+
+    // Validate provider
+    if (config.provider !== undefined) {
+      const validProviders = ['google-drive', 'onedrive', 's3'];
+      if (!validProviders.includes(config.provider)) {
+        errors.push(`Invalid provider: "${config.provider}". Valid options: ${validProviders.join(', ')}`);
+      }
+    }
+
+    // Validate folders configuration
+    if (config.driveFolders !== undefined && !Array.isArray(config.driveFolders)) {
+      errors.push(`driveFolders must be an array, got: ${typeof config.driveFolders}`);
+    }
+
+    // Log warnings
+    if (warnings.length > 0) {
+      this.log_warn("⚠️  Configuration warnings:");
+      warnings.forEach(w => this.log_warn(`   ${w}`));
+    }
+
+    // Log errors
+    if (errors.length > 0) {
+      this.log_error("❌ Configuration errors:");
+      errors.forEach(e => this.log_error(`   ${e}`));
+    }
+
+    return { valid: errors.length === 0, warnings, errors };
+  },
+
+  /**
    * Initialize all components
    */
   initialize: async function (config) {
@@ -155,6 +245,17 @@ const NodeHelperObject = {
     try {
       this.log_info("Initializing MMM-CloudPhotos V3...");
       this.config = config;
+
+      // Validate user configuration
+      const validation = this.validateConfiguration(config);
+      if (!validation.valid) {
+        this.log_error("Configuration validation failed. Please fix the errors above.");
+        this.sendSocketNotification("ERROR", {
+          message: "Invalid configuration",
+          details: validation.errors.join('\n')
+        });
+        return;
+      }
 
       // Validate and configure authentication retry behavior
       this.maxAuthRetries = this.validateMaxAuthRetries(config.maxAuthRetries);
